@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat</title>
+
+    <style>
+      * {
+        font-family: monospace;
+      }
+
+      body {
+        margin: 0;
+        border: 0;
+        padding: 0;
+        height: 100vh;
+      }
+      #container {
+        display: grid;
+        grid-template-columns: auto 200px;
+        grid-template-rows: auto 100px;
+        height: 100%;
+        width: 100%;
+        place-items: center;
+        gap: 1px;
+        background-color: black;
+      }
+
+      .bg-white {
+        background-color: white;
+      }
+
+      #messages {
+        grid-row: 1;
+        grid-column: 1;
+        width: 100%;
+        height: 100%;
+        overflow: auto scroll;
+      }
+
+      #text-box {
+        grid-row: 2;
+        grid-column: 1;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
+
+      #text-box-area {
+        resize: none;
+        padding: 1px;
+        margin: 0;
+        border: 0;
+        outline: none;
+        border: none;
+        height: inherit;
+        width: inherit;
+      }
+
+      #user-list {
+        grid-row: 1 / span 2;
+        grid-column: 2;
+        min-width: 100%;
+        height: 100%;
+      }
+
+      .no-style-list {
+        list-style: none;
+      }
+
+      #msg-list {
+        line-height: 40px;
+      }
+
+      #register-modal {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background-color: rgba(0, 0, 0, 0.3);
+        height: 100vh;
+        width: 100%;
+      }
+
+      #register-modal-container {
+        width: 200px;
+        height: 150px;
+        background-color: white;
+        margin: 40vh auto;
+        padding: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <div class="bg-white" id="messages">
+        <ul class="no-style-list" id="msg-list"></ul>
+      </div>
+      <div class="bg-white" id="text-box">
+        <textarea name="text-box-area" id="text-box-area"></textarea>
+      </div>
+      <div class="bg-white" id="user-list">
+        <ul class="no-style-list" id="user-list-list"></ul>
+      </div>
+    </div>
+
+    <div id="register-modal">
+      <div id="register-modal-container">
+        <form id="register-form">
+          <h3>Entre no chat</h3>
+          <p><label for="userid">Usuário:</label></p>
+          <p><input type="text" name="userid" id="userid" /></p>
+          <p><label for="room">Sala:</label></p>
+          <p><input type="text" name="room" id="room" /></p>
+          <p><button>Enter</button></p>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        let currentRoom = null;
+        let currentUser = null;
+        const $ = (s, e = document) => e.querySelector(s);
+        const $$ = (s, e = document) => Array.from(e.querySelectorAll(s));
+        const messages = [];
+        const textBoxArea = $("#text-box-area");
+        const messageList = $("#msg-list");
+        const userId = $("#userid");
+        const roomEl = $("#room");
+        const userList = $("#user-list-list");
+        const registerForm = $("#register-form");
+        const registerModal = $("#register-modal");
+
+        textBoxArea.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            addMessage();
+          }
+        });
+
+        registerForm.addEventListener("submit", (ev) => {
+          ev.preventDefault();
+          register();
+        });
+
+        async function addMessage() {
+          const msg = textBoxArea.value;
+          const msgObj = { user: currentUser, msg, time: new Date() };
+          await sendMessage(msgObj, currentRoom);
+          textBoxArea.value = "";
+        }
+
+        async function sendMessage(msg, room) {
+          await fetch("/chat/" + room, {
+            method: "post",
+            body: JSON.stringify(msg),
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        function addRemoteMessage(msg) {
+          msg.time = new Date(msg.time);
+          messages.push(msg);
+          updateMessages();
+        }
+
+        function updateMessages() {
+          const lis = messages.map(({ user, msg, time }) => {
+            const li = document.createElement("li");
+            li.textContent = user + " (" + time.toLocaleString() + "): " + msg;
+            return li;
+          });
+
+          Array.from(messageList.children).forEach((li) => li.remove());
+          lis.forEach((li) => messageList.appendChild(li));
+        }
+
+        async function register() {
+          const user = userId.value;
+          const room = roomEl.value;
+          currentRoom = room;
+          currentUser = user;
+          createEventSource(room, user);
+          addUser(user);
+          hideForm();
+        }
+
+        function addUser(user) {
+          const li = document.createElement("li");
+          li.textContent = user;
+          userList.appendChild(li);
+        }
+
+        function initUsers(users) {
+          $$("li", userList).forEach((el) => el.remove());
+          users.forEach((u) => addUser(u));
+        }
+
+        function removeUser(user) {
+          $$("li", userList).forEach((el) => {
+            if (el.textContent === user) {
+              el.remove();
+            }
+          });
+        }
+
+        function hideForm() {
+          registerModal.style.display = "none";
+        }
+
+        function addRemoteUser({ user }) {
+          addUserConnectedMessage(user);
+          addUser(user);
+        }
+
+        function removeRemoteUser({ user }) {
+          addUserExitedMessage(user);
+          removeUser(user);
+        }
+
+        function addConnectedMessage() {
+          messages.push({
+            user: "Server",
+            time: new Date(),
+            msg: "Conectado à sala " + currentRoom,
+          });
+
+          updateMessages();
+        }
+
+        function addUserConnectedMessage(userId) {
+          messages.push({
+            user: "Server",
+            time: new Date(),
+            msg: "Usuário " + userId + " conectou na sala",
+          });
+          updateMessages();
+        }
+
+        function addUserExitedMessage(userId) {
+          messages.push({
+            user: "Server",
+            time: new Date(),
+            msg: "Usuário " + userId + " saiu da sala",
+          });
+          updateMessages();
+        }
+
+        function createEventSource(room, userId) {
+          userId = encodeURIComponent(userId);
+          const es = new EventSource("/chat/" + room + "?userId=" + userId);
+
+          es.addEventListener("chat-connected", () => addConnectedMessage());
+
+          es.addEventListener("current-users", (ev) =>
+            initUsers(JSON.parse(ev.data))
+          );
+
+          es.addEventListener("chat-message", (ev) =>
+            addRemoteMessage(JSON.parse(ev.data))
+          );
+
+          es.addEventListener("user-enter", (ev) =>
+            addRemoteUser(JSON.parse(ev.data))
+          );
+
+          es.addEventListener("user-exists", (ev) =>
+            removeRemoteUser(JSON.parse(ev.data))
+          );
+        }
+      })();
+    </script>
+  </body>
+</html>
