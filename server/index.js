@@ -3,8 +3,11 @@ const restify = require("restify");
 const { json, urlencoded } = require("body-parser");
 const { Subject } = require("rxjs");
 
+// Creates a restify server
 const server = restify.createServer();
 
+// Initializes the room storage as a hash map of Room objects that maintain the
+// the client connections
 const rooms = {};
 
 server.use(json());
@@ -27,7 +30,7 @@ server.get("/chat/:room", (req, res, next) => {
   }
 
   if (!rooms[room]) {
-    rooms[room] = createRoom();
+    rooms[room] = Room.createRoom();
   }
 
   const roomName = room;
@@ -101,51 +104,97 @@ function sendExitUserMessage(req, user) {
   req.write("event: user-exits\ndata: " + JSON.stringify({ user }) + "\n\n");
 }
 
-function createRoom() {
-  return new Room();
-}
-
 class Room {
+  // Keeps the whole messages that where sent in this room
   _messages = [];
+
+  // Keeps the unique userids that are in the room
   _users = new Set([]);
+
+  // Observable of new messages sent to the room
   _$messages = new Subject();
+
+  // Observable for the users that join the room
   _$newUsers = new Subject();
+
+  // Observable for the users that leave the room
   _$exitUsers = new Subject();
 
+  /**
+   * Creates a new Room
+   * @returns a new instance of Room
+   */
+  static createRoom() {
+    return new Room();
+  }
+
+  /**
+   * returns a reference to the messages observable to listen to new messages
+   * sent to this room
+   */
   get $messages() {
     return this._$messages.asObservable();
   }
 
+  /**
+   * Returns a reference to the newUsers observable to listen to new users added
+   * to the room
+   */
   get $newUsers() {
     return this._$newUsers.asObservable();
   }
 
+  /**
+   * Returns a reference to the exitUsers observable to listen to new users
+   */
   get $exitUsers() {
     return this._$exitUsers.asObservable();
   }
 
+  /**
+   * Returns all the messages sent in this room
+   */
   get messages() {
     return this._messages;
   }
 
+  /**
+   * returns a list of all users currently in the room
+   */
   get users() {
     return Array.from(this._users);
   }
 
+  /**
+   * says if the room is currently empty or not
+   */
   get empty() {
     return this._users.length === 0;
   }
 
+  /**
+   * Send a new message to this room
+   * @param {String} msg A new message
+   */
   addMessage(msg) {
     this._messages.push(msg);
     this._$messages.next(msg);
   }
 
+  /**
+   * Removes a user from the room
+   * @param {String} userId A user id
+   */
   exit(userId) {
     this._users.delete(userId);
     this._$exitUsers.next(userId);
   }
 
+  /**
+   * Adds a user to this room
+   * @param {String} userId the user id
+   * @returns {undefined}
+   */
   join(userId) {
     if (this._users.has(userId)) return;
     this._users.add(userId);
