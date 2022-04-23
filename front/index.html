@@ -87,9 +87,9 @@
 
       #register-modal-container {
         width: 200px;
-        height: 150px;
+        height: 200px;
         background-color: white;
-        margin: 40vh auto;
+        margin: 30vh auto;
         padding: 5px;
       }
     </style>
@@ -270,7 +270,7 @@
             addRemoteUser(JSON.parse(ev.data))
           );
 
-          es.addEventListener("user-exists", (ev) =>
+          es.addEventListener("user-exits", (ev) =>
             removeRemoteUser(JSON.parse(ev.data))
           );
         }
