@@ -1,7 +1,7 @@
 const { createReadStream } = require("fs");
 const restify = require("restify");
 const { json, urlencoded } = require("body-parser");
-const { Subject } = require("rxjs");
+const EventEmitter = require("events");
 
 // Creates a restify server
 const server = restify.createServer();
@@ -23,6 +23,7 @@ server.get("/chat/:room", (req, res, next) => {
   let { room } = req.params;
   const { userId } = req.query;
 
+  // Validating the request
   if (!room || !userId) {
     res.status(400);
     res.json({ error: "room or userId not defined" });
@@ -38,15 +39,29 @@ server.get("/chat/:room", (req, res, next) => {
 
   room.join(userId);
 
+  // Defining the request as event stream
   res.setHeader("Content-Type", "text/event-stream");
+
   sendCurrentUsers(res, room);
 
-  room.$messages.subscribe((newMessage) => sendNewMessage(res, newMessage));
-  room.$newUsers.subscribe((user) => sendNewUserMessage(res, user));
-  room.$exitUsers.subscribe((user) => sendExitUserMessage(res, user));
+  // Initializing listeners
+  const messageListener = (newMessage) => sendNewMessage(res, newMessage);
+  const newUserListener = (user) => sendNewUserMessage(res, user);
+  const exitUserListener = (user) => sendExitUserMessage(res, user);
+
+  room.on(Room.events.NewMessage, messageListener);
+  room.on(Room.events.NewUser, newUserListener);
+  room.on(Room.events.ExitUser, exitUserListener);
 
   req.once("close", () => {
     room.exit(userId);
+
+    // As we are using EventEmitter, we need to remove listeners to prevent
+    // memory leaks
+    room.off(Room.events.NewMessage, messageListener);
+    room.off(Room.events.NewUser, newUserListener);
+    room.off(Room.events.ExitUser, exitUserListener);
+
     if (room.empty) {
       rooms[roomName] = undefined;
       delete rooms[roomName];
@@ -104,21 +119,21 @@ function sendExitUserMessage(req, user) {
   req.write("event: user-exits\ndata: " + JSON.stringify({ user }) + "\n\n");
 }
 
-class Room {
+class Room extends EventEmitter {
+  /**
+   * Tracks events of the Room Class
+   */
+  static events = {
+    NewMessage: "new-message",
+    NewUser: "new-user",
+    ExitUser: "exit-user",
+  };
+
   // Keeps the whole messages that where sent in this room
   _messages = [];
 
   // Keeps the unique userids that are in the room
   _users = new Set([]);
-
-  // Observable of new messages sent to the room
-  _$messages = new Subject();
-
-  // Observable for the users that join the room
-  _$newUsers = new Subject();
-
-  // Observable for the users that leave the room
-  _$exitUsers = new Subject();
 
   /**
    * Creates a new Room
@@ -126,29 +141,6 @@ class Room {
    */
   static createRoom() {
     return new Room();
-  }
-
-  /**
-   * returns a reference to the messages observable to listen to new messages
-   * sent to this room
-   */
-  get $messages() {
-    return this._$messages.asObservable();
-  }
-
-  /**
-   * Returns a reference to the newUsers observable to listen to new users added
-   * to the room
-   */
-  get $newUsers() {
-    return this._$newUsers.asObservable();
-  }
-
-  /**
-   * Returns a reference to the exitUsers observable to listen to new users
-   */
-  get $exitUsers() {
-    return this._$exitUsers.asObservable();
   }
 
   /**
@@ -178,7 +170,7 @@ class Room {
    */
   addMessage(msg) {
     this._messages.push(msg);
-    this._$messages.next(msg);
+    this.emit(Room.events.NewMessage, msg);
   }
 
   /**
@@ -187,7 +179,7 @@ class Room {
    */
   exit(userId) {
     this._users.delete(userId);
-    this._$exitUsers.next(userId);
+    this.emit(Room.events.ExitUser, userId);
   }
 
   /**
@@ -198,6 +190,6 @@ class Room {
   join(userId) {
     if (this._users.has(userId)) return;
     this._users.add(userId);
-    this._$newUsers.next(userId);
+    this.emit(Room.events.NewUser, userId);
   }
 }
